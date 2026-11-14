@@ -1,6 +1,6 @@
 script_name('GwarnV1')
 script_author('Ellis_Harris')
-script_version('1.2.2')
+script_version('1.2.3')
 script_description('Справочник уставов Arizona RP, штат Yuma')
 
 require 'lib.moonloader'
@@ -14,7 +14,7 @@ local new = imgui.new
 
 local cfg = inicfg.load({ settings = { accent_r = 0.20, accent_g = 0.48, accent_b = 0.82 } }, 'GwarnV1.ini')
 local json = require 'dkjson'
-local SCRIPT_VERSION = '1.2.2'
+local SCRIPT_VERSION = '1.2.3'
 local accent = new.float[3](cfg.settings.accent_r, cfg.settings.accent_g, cfg.settings.accent_b)
 local window = new.bool(false)
 local idWindow = new.bool(false)
@@ -26,6 +26,7 @@ local activeOrg = 1
 local chosenRule = nil
 local chosenOrg = 1
 local articleWindow = new.bool(false)
+local articleWindowFocus = false
 local manageMode = new.bool(false)
 local editorOrg = new.int(0)
 local manageOrg = new.int(0)
@@ -631,6 +632,7 @@ local function openArticleEditor(mode, orgIndex, ruleIndex, rule)
     editorNumber = makeBuffer(64, rule and rule.number or '')
     editorText = makeBuffer(4096, rule and rule.text or '')
     articleWindow[0] = true
+    articleWindowFocus = true
 end
 
 local function openRule(rule)
@@ -836,7 +838,10 @@ imgui.OnFrame(function() return window[0] and idWindow[0] end, function()
 end)
 imgui.OnFrame(function() return window[0] and articleWindow[0] end, function()
     imgui.SetNextWindowSize(imgui.ImVec2(520, 350), imgui.Cond.FirstUseEver)
-    imgui.SetNextWindowFocus()
+    if articleWindowFocus then
+        imgui.SetNextWindowFocus()
+        articleWindowFocus = false
+    end
     local title = editorMode == 'add' and 'Добавить устав' or 'Редактировать устав'
     if imgui.Begin(title, articleWindow, imgui.WindowFlags.NoResize) then
         if articleWindow[0] then
