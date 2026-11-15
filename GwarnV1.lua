@@ -1,6 +1,6 @@
 script_name('GwarnV1')
 script_author('Ellis_Harris')
-script_version('1.2.3')
+script_version('1.2.9')
 script_description('Справочник уставов Arizona RP, штат Yuma')
 
 require 'lib.moonloader'
@@ -12,16 +12,23 @@ local imgui = require 'mimgui'
 local inicfg = require 'inicfg'
 local new = imgui.new
 
-local cfg = inicfg.load({ settings = { accent_r = 0.20, accent_g = 0.48, accent_b = 0.82 } }, 'GwarnV1.ini')
+local cfg = inicfg.load({ settings = { accent_r = 0.20, accent_g = 0.48, accent_b = 0.82, rp_emotes = true, background_transparency = 0.25 } }, 'GwarnV1.ini')
 local json = require 'dkjson'
-local SCRIPT_VERSION = '1.2.3'
+local SCRIPT_VERSION = '1.2.9'
 local accent = new.float[3](cfg.settings.accent_r, cfg.settings.accent_g, cfg.settings.accent_b)
+local backgroundTransparencyPercent = new.float((tonumber(cfg.settings.background_transparency) or 0.25) * 100.0)
+local rpEmotes = cfg.settings.rp_emotes
+if rpEmotes == nil then rpEmotes = true end
+if type(rpEmotes) == 'string' then rpEmotes = rpEmotes == 'true' or rpEmotes == '1' end
+if type(rpEmotes) == 'number' then rpEmotes = rpEmotes ~= 0 end
+local rpSwitchAnimation = rpEmotes and 1.0 or 0.0
 local window = new.bool(false)
 local idWindow = new.bool(false)
 local settingsPage = new.bool(false)
 local searchInput = new.char[256]()
 local idInput = new.char[16]()
-local idInputFocus = false
+local idInputFocusFrames = 0
+local idInputSession = 0
 local activeOrg = 1
 local chosenRule = nil
 local chosenOrg = 1
@@ -86,6 +93,10 @@ local themePresets = {
     { id = 3, name = 'Синяя', color = { 0.20, 0.48, 0.82 } }
 }
 
+local function getBackgroundOpacity()
+    return 1.0 - math.max(0.0, math.min(75.0, backgroundTransparencyPercent[0])) / 100.0
+end
+
 local function applyTheme()
     local style = imgui.GetStyle()
     if not style then return end
@@ -121,7 +132,8 @@ local function applyTheme()
 
     local primary = { accent[0], accent[1], accent[2] }
     local light = themeId == 2
-    local darkBg = light and { 0, 0, 0, 1 } or { 0.14, 0.12, 0.16, 1 }
+    local opacity = getBackgroundOpacity()
+    local darkBg = light and { 0, 0, 0, opacity } or { 0.14, 0.12, 0.16, opacity }
     local panel = light and { 0.20, 0.20, 0.20, 1 } or { 0.30, 0.20, 0.39, 1 }
     local frame = light and { 1, 1, 1, 0.28 } or { 0.30, 0.20, 0.39, 1 }
     local textColor = light and { 0.90, 0.90, 0.90, 1 } or { 0.94, 0.92, 0.96, 1 }
@@ -142,41 +154,41 @@ local function applyTheme()
         Text = textColor,
         TextDisabled = light and { 1, 1, 1, 1 } or { 0.55, 0.53, 0.59, 1 },
         WindowBg = darkBg,
-        ChildBg = light and darkBg or { 0.30, 0.20, 0.39, 0 },
+        ChildBg = light and { 0, 0, 0, opacity * 0.32 } or { 0.30, 0.20, 0.39, opacity * 0.12 },
         PopupBg = light and { 0, 0, 0, 1 } or { 0.05, 0.05, 0.10, 0.90 },
         Border = border,
         BorderShadow = light and { 0.35, 0.35, 0.35, 0.66 } or { 0, 0, 0, 0 },
         FrameBg = frame,
-        FrameBgHovered = light and { 0.68, 0.68, 0.68, 0.67 } or accentHover,
-        FrameBgActive = light and { 0.79, 0.73, 0.73, 0.62 } or accentColor,
+        FrameBgHovered = accentHover,
+        FrameBgActive = accentColor,
         TitleBg = light and darkBg or { primary[1], primary[2], primary[3], 0.45 },
-        TitleBgActive = light and { 0.46, 0.46, 0.46, 1 } or { primary[1], primary[2], primary[3], 0.78 },
+        TitleBgActive = light and accentColor or { primary[1], primary[2], primary[3], 0.78 },
         TitleBgCollapsed = light and darkBg or { primary[1], primary[2], primary[3], 0.35 },
         MenuBarBg = light and { 0, 0, 0, 0.80 } or panel,
         ScrollbarBg = light and { 0, 0, 0, 0.60 } or panel,
         ScrollbarGrab = light and { 1, 1, 1, 0.87 } or { primary[1], primary[2], primary[3], 0.31 },
         ScrollbarGrabHovered = light and { 1, 1, 1, 0.79 } or accentHover,
-        ScrollbarGrabActive = light and { 0.80, 0.50, 0.50, 0.40 } or accentColor,
+        ScrollbarGrabActive = accentColor,
         CheckMark = light and { 0.99, 0.99, 0.99, 0.90 } or { 0.75, 0.68, 1, 1 },
         SliderGrab = light and { 1, 1, 1, 0.42 } or accentSoft,
-        SliderGrabActive = light and { 0.76, 0.76, 0.76, 1 } or accentColor,
-        Button = light and { 0.51, 0.51, 0.51, 0.60 } or accentSoft,
-        ButtonHovered = light and { 0.68, 0.68, 0.68, 1 } or accentHover,
-        ButtonActive = light and { 0.67, 0.67, 0.67, 1 } or accentActive,
-        Header = light and { 0.72, 0.72, 0.72, 0.54 } or { primary[1], primary[2], primary[3], 0.76 },
-        HeaderHovered = light and { 0.92, 0.92, 0.95, 0.77 } or accentHover,
-        HeaderActive = light and { 0.82, 0.82, 0.82, 0.80 } or accentColor,
+        SliderGrabActive = accentColor,
+        Button = accentSoft,
+        ButtonHovered = accentHover,
+        ButtonActive = accentActive,
+        Header = light and { primary[1], primary[2], primary[3], 0.54 } or { primary[1], primary[2], primary[3], 0.76 },
+        HeaderHovered = accentHover,
+        HeaderActive = accentColor,
         Separator = light and { 0.73, 0.73, 0.73, 1 } or border,
         SeparatorHovered = light and { 0.81, 0.81, 0.81, 1 } or accentHover,
         SeparatorActive = light and { 0.74, 0.74, 0.74, 1 } or accentColor,
         ResizeGrip = light and { 0.80, 0.80, 0.80, 0.30 } or accentSoft,
         ResizeGripHovered = light and { 0.95, 0.95, 0.95, 0.60 } or accentHover,
-        ResizeGripActive = light and { 1, 1, 1, 0.90 } or accentColor,
-        Tab = light and { 0.40, 0.40, 0.40, 0.86 } or accentSoft,
-        TabHovered = light and { 0.68, 0.68, 0.68, 0.80 } or accentHover,
-        TabActive = light and { 0.48, 0.48, 0.48, 1 } or accentColor,
+        ResizeGripActive = accentColor,
+        Tab = light and { primary[1], primary[2], primary[3], 0.60 } or accentSoft,
+        TabHovered = accentHover,
+        TabActive = accentColor,
         TabUnfocused = light and { 0.30, 0.30, 0.30, 0.97 } or { panel[1], panel[2], panel[3], 1 },
-        TabUnfocusedActive = light and { 0.40, 0.40, 0.40, 1 } or accentSoft,
+        TabUnfocusedActive = accentSoft,
         PlotLines = textColor,
         PlotLinesHovered = accentColor,
         PlotHistogram = textColor,
@@ -615,7 +627,81 @@ local function saveConfig()
     cfg.settings.accent_g = accent[1]
     cfg.settings.accent_b = accent[2]
     cfg.settings.theme_id = themeId
+    cfg.settings.rp_emotes = rpEmotes
+    cfg.settings.background_transparency = backgroundTransparencyPercent[0] / 100.0
     inicfg.save(cfg, 'GwarnV1.ini')
+end
+
+local function centerWidget(width)
+    local currentX = imgui.GetCursorPosX()
+    local available = imgui.GetContentRegionAvail().x
+    imgui.SetCursorPosX(currentX + math.max(0, (available - width) * 0.5))
+end
+
+local function centerText(text)
+    centerWidget(imgui.CalcTextSize(text).x)
+    imgui.TextUnformatted(text)
+end
+
+local function drawAnimatedSwitch(label)
+    local clicked = imgui.InvisibleButton(label, imgui.ImVec2(52, 28))
+    if clicked then
+        rpEmotes = not rpEmotes
+        saveConfig()
+    end
+
+    local io = imgui.GetIO()
+    local delta = tonumber(io.DeltaTime) or 0.016
+    local target = rpEmotes and 1.0 or 0.0
+    rpSwitchAnimation = rpSwitchAnimation + (target - rpSwitchAnimation) * math.min(1.0, delta * 14.0)
+
+    local minimum = imgui.GetItemRectMin()
+    local maximum = imgui.GetItemRectMax()
+    local drawList = imgui.GetWindowDrawList()
+    local background
+    if rpEmotes then
+        background = imgui.U32(accent[0], accent[1], accent[2], imgui.IsItemHovered() and 1.0 or 0.86)
+    else
+        background = imgui.U32(0.22, 0.24, 0.28, imgui.IsItemHovered() and 1.0 or 0.9)
+    end
+    drawList:AddRectFilled(minimum, maximum, background, 14.0)
+    drawList:AddCircleFilled(
+        imgui.ImVec2(minimum.x + 14.0 + 24.0 * rpSwitchAnimation, (minimum.y + maximum.y) * 0.5),
+        9.5,
+        imgui.U32(0.97, 0.97, 1.0, 1.0),
+        20
+    )
+end
+
+local function submitWarning(id)
+    local org = organizations[chosenOrg]
+    if not org or not chosenRule then return end
+
+    local command = '/gwarn ' .. id .. ' ' .. chosenRule.number .. ' ' .. org.code
+    local emotes = rpEmotes
+    local fractionTag = org.code
+    idWindow[0] = false
+    window[0] = false
+
+    lua_thread.create(function()
+        local messages = {}
+        if emotes then
+            messages[#messages + 1] = '/do КПК находится на поясном держателе.'
+            messages[#messages + 1] = '/me берёт в руки свой КПК и включает его'
+            messages[#messages + 1] = '/me открыв базу данных ' .. fractionTag .. ' переходит в раздел управление сотрудниками других организаций'
+            messages[#messages + 1] = '/me открывает дело нужного сотрудника и вносит в него изменения'
+            messages[#messages + 1] = '/do Изменения успешно сохранены.'
+        end
+        messages[#messages + 1] = command
+        if emotes then
+            messages[#messages + 1] = '/me выходит с базы данных ' .. fractionTag .. ' и выключив КПК убирает его на поясной держатель'
+        end
+
+        for i, message in ipairs(messages) do
+            sampSendChat(u8:decode(message))
+            if i < #messages then wait(1100) end
+        end
+    end)
 end
 
 local function makeBuffer(size, value)
@@ -639,7 +725,8 @@ local function openRule(rule)
     chosenRule = rule
     chosenOrg = activeOrg
     idInput = new.char[16]()
-    idInputFocus = true
+    idInputSession = idInputSession + 1
+    idInputFocusFrames = 3
     idWindow[0] = true
 end
 
@@ -652,6 +739,10 @@ loadCachedRules()
 
 function onWindowMessage(msg, wparam, lparam)
     if not window[0] then return end
+    if idWindow[0] and (msg == 0x0100 or msg == 0x0101) and (wparam == 0x0D or wparam == 0x6C) then
+        consumeWindowMessage(true, false)
+        return
+    end
     if wparam ~= 0x1B or (msg ~= 0x0100 and msg ~= 0x0101) then return end
     if isPauseMenuActive() or sampIsChatInputActive() or sampIsDialogActive() then return end
 
@@ -694,7 +785,8 @@ imgui.OnFrame(function() return window[0] end, function()
     imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(accent[0], accent[1], accent[2], 0.72))
     imgui.PushStyleColor(imgui.Col.ButtonHovered, imgui.ImVec4(math.min(accent[0] + 0.12, 1.0), math.min(accent[1] + 0.12, 1.0), math.min(accent[2] + 0.12, 1.0), 1.0))
     imgui.SetNextWindowSize(imgui.ImVec2(800, 600), imgui.Cond.FirstUseEver)
-    if imgui.Begin('GwarnV1 | Справочник уставов', window) then
+    imgui.SetNextWindowBgAlpha(getBackgroundOpacity())
+    if imgui.Begin('GwarnV1 | Справочник уставов', window, imgui.WindowFlags.NoCollapse) then
         if imgui.Button(settingsPage[0] and 'К уставам' or 'Настройки') then
             settingsPage[0] = not settingsPage[0]
             manageMode[0] = false
@@ -704,73 +796,112 @@ imgui.OnFrame(function() return window[0] end, function()
         imgui.Separator()
 
         if settingsPage[0] then
-            imgui.TextWrapped('Автор идеи: Ellis_Harris')
-            imgui.Text('Цвет интерфейса')
-            for i, preset in ipairs(themePresets) do
-                if i > 1 then imgui.SameLine() end
-                imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(preset.color[1], preset.color[2], preset.color[3], 0.82))
-                if imgui.Button(preset.name, imgui.ImVec2(145, 0)) then
-                    themeId = preset.id
-                    accent[0], accent[1], accent[2] = preset.color[1], preset.color[2], preset.color[3]
-                    saveConfig()
-                end
-                imgui.PopStyleColor()
-            end
-            if imgui.ColorEdit3('Акцентный цвет', accent) then saveConfig() end
-            imgui.Separator()
-            if imgui.Button('Проверить обновление LUA', imgui.ImVec2(235, 0)) then checkForScriptUpdate(true) end
-            imgui.SameLine()
-            if imgui.Button('Проверить уставы', imgui.ImVec2(190, 0)) then checkForRulesUpdate(true) end
-            imgui.TextWrapped('LUA: ' .. scriptUpdateStatus)
-            imgui.TextWrapped('Уставы: ' .. rulesStatus)
-
-
-            if imgui.Button('Добавить устав', imgui.ImVec2(180, 0)) then
-                openArticleEditor('add', activeOrg, nil, nil)
-            end
-            imgui.SameLine()
-            if imgui.Button(manageMode[0] and 'Скрыть редактирование' or 'Редактировать устав', imgui.ImVec2(220, 0)) then
-                manageMode[0] = not manageMode[0]
-                manageHoverRow = nil
-            end
-
-            if manageMode[0] then
+            centerWidget(620)
+            if imgui.BeginChild('##settings_panel', imgui.ImVec2(620, 0), true) then
+                imgui.Spacing()
+                centerText('НАСТРОЙКИ GwarnV1')
+                centerText('Автор идеи: Ellis_Harris')
+                centerWidget(560)
+                imgui.TextWrapped('GitHub проекта: https://github.com/ellisharrisyuma-alt/Gwarn1')
                 imgui.Separator()
-                imgui.Text('Выберите раздел:')
-                if imgui.ComboStr('##manage_section', manageOrg, organizationItems, 8) then
+
+                centerText('ОФОРМЛЕНИЕ')
+                centerWidget(455)
+                for i, preset in ipairs(themePresets) do
+                    if i > 1 then imgui.SameLine() end
+                    imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(preset.color[1], preset.color[2], preset.color[3], 0.88))
+                    if imgui.Button(preset.name, imgui.ImVec2(145, 34)) then
+                        themeId = preset.id
+                        accent[0], accent[1], accent[2] = preset.color[1], preset.color[2], preset.color[3]
+                        saveConfig()
+                    end
+                    imgui.PopStyleColor()
+                end
+                centerText('Акцентный цвет')
+                imgui.PushItemWidth(460)
+                centerWidget(460)
+                if imgui.ColorEdit3('##accent_color', accent) then saveConfig() end
+                imgui.PopItemWidth()
+
+                centerText('Прозрачность фона')
+                imgui.PushItemWidth(460)
+                centerWidget(460)
+                imgui.SliderFloat('##background_transparency', backgroundTransparencyPercent, 0.0, 75.0, '%.0f%%')
+                if imgui.IsItemDeactivatedAfterEdit() then saveConfig() end
+                imgui.PopItemWidth()
+
+                local rpLabel = 'RP-отыгровка при выдаче'
+                centerWidget(imgui.CalcTextSize(rpLabel).x + 16 + 52)
+                imgui.TextUnformatted(rpLabel)
+                imgui.SameLine()
+                drawAnimatedSwitch('##rp_emotes_switch')
+                imgui.Separator()
+
+                centerText('ОБНОВЛЕНИЯ')
+                centerWidget(440)
+                if imgui.Button('Проверить обновление LUA', imgui.ImVec2(235, 36)) then checkForScriptUpdate(true) end
+                imgui.SameLine()
+                if imgui.Button('Проверить уставы', imgui.ImVec2(190, 36)) then checkForRulesUpdate(true) end
+                centerWidget(560)
+                imgui.TextWrapped('LUA: ' .. scriptUpdateStatus)
+                centerWidget(560)
+                imgui.TextWrapped('Уставы: ' .. rulesStatus)
+                imgui.Separator()
+
+                centerText('УПРАВЛЕНИЕ УСТАВАМИ')
+                centerWidget(425)
+                if imgui.Button('Добавить устав', imgui.ImVec2(180, 36)) then
+                    openArticleEditor('add', activeOrg, nil, nil)
+                end
+                imgui.SameLine()
+                if imgui.Button(manageMode[0] and 'Скрыть список' or 'Редактировать уставы', imgui.ImVec2(220, 36)) then
+                    manageMode[0] = not manageMode[0]
                     manageHoverRow = nil
                 end
-                local orgIndex = manageOrg[0] + 1
-                local org = organizations[orgIndex] or organizations[1]
-                imgui.BeginChild('##manage_rules', imgui.ImVec2(0, -8), true)
-                local contentWidth = imgui.GetContentRegionAvail().x
-                imgui.Columns(2, '##manage_columns', true)
-                imgui.SetColumnWidth(0, math.max(300, contentWidth - 90))
-                for i, rule in ipairs(org.rules) do
-                    imgui.TextWrapped(rule.number .. ' - ' .. rule.text)
-                    imgui.NextColumn()
-                    local action = nil
-                    if imgui.SmallButton('\208\160\208\181\208\180.##rule_edit_' .. i) then action = 'edit' end
-                    imgui.SameLine()
-                    if imgui.SmallButton('X##rule_delete_' .. i) then action = 'delete' end
-                    imgui.NextColumn()
 
-                    if action == 'edit' then
-                        openArticleEditor('edit', orgIndex, i, rule)
-                        break
-                    elseif action == 'delete' then
-                        table.remove(org.rules, i)
-                        saveRuleStore()
-                        break
+                if manageMode[0] then
+                    imgui.Separator()
+                    centerWidget(520)
+                    if imgui.ComboStr('##manage_section', manageOrg, organizationItems, 8) then
+                        manageHoverRow = nil
                     end
+                    local orgIndex = manageOrg[0] + 1
+                    local org = organizations[orgIndex] or organizations[1]
+                    imgui.BeginChild('##manage_rules', imgui.ImVec2(0, -8), true)
+                    local contentWidth = imgui.GetContentRegionAvail().x
+                    imgui.Columns(2, '##manage_columns', true)
+                    imgui.SetColumnWidth(0, math.max(300, contentWidth - 90))
+                    for i, rule in ipairs(org.rules) do
+                        imgui.TextWrapped(rule.number .. ' - ' .. rule.text)
+                        imgui.NextColumn()
+                        local action = nil
+                        if imgui.SmallButton('\208\160\208\181\208\180.##rule_edit_' .. i) then action = 'edit' end
+                        imgui.SameLine()
+                        if imgui.SmallButton('X##rule_delete_' .. i) then action = 'delete' end
+                        imgui.NextColumn()
+
+                        if action == 'edit' then
+                            openArticleEditor('edit', orgIndex, i, rule)
+                            break
+                        elseif action == 'delete' then
+                            table.remove(org.rules, i)
+                            saveRuleStore()
+                            break
+                        end
+                    end
+                    imgui.Columns(1)
+                    if #org.rules == 0 then imgui.Text('В этом разделе пока нет статей.') end
+                    imgui.EndChild()
                 end
-                imgui.Columns(1)
-                if #org.rules == 0 then imgui.Text('В этом разделе пока нет статей.') end
-                imgui.EndChild()
             end
+            imgui.EndChild()
         else
-            imgui.InputText('Поиск по выбранному уставу', searchInput, 256)
+            centerWidget(560)
+            imgui.PushItemWidth(560)
+            imgui.InputTextWithHint('##rules_search', 'Поиск по статьям устава', searchInput, 256)
+            imgui.PopItemWidth()
             local query = ffi.string(searchInput)
+            local sectionWidth = (imgui.GetContentRegionAvail().x - 16) / 3
             for i, org in ipairs(organizations) do
                 if i > 1 and (i - 1) % 3 ~= 0 then imgui.SameLine() end
                 local selected = i == activeOrg
@@ -779,22 +910,42 @@ imgui.OnFrame(function() return window[0] end, function()
                     imgui.PushStyleColor(imgui.Col.ButtonHovered, imgui.ImVec4(math.min(accent[0] + 0.12, 1.0), math.min(accent[1] + 0.12, 1.0), math.min(accent[2] + 0.12, 1.0), 1.0))
                     imgui.PushStyleColor(imgui.Col.ButtonActive, imgui.ImVec4(math.min(accent[0] + 0.20, 1.0), math.min(accent[1] + 0.20, 1.0), math.min(accent[2] + 0.20, 1.0), 1.0))
                 end
-                if imgui.Button(org.name) then activeOrg = i end
+                if imgui.Button(org.name, imgui.ImVec2(sectionWidth, 36)) then activeOrg = i end
                 if selected then imgui.PopStyleColor(3) end
             end
             local org = organizations[activeOrg]
             imgui.Separator()
             if org.note ~= '' then imgui.TextWrapped(org.note) end
             if org.updated_at and org.updated_at ~= '' then imgui.Text('Дата обновления базы: ' .. org.updated_at) end
-            imgui.Text('Нажмите на статью, чтобы открыть меню наказания.')
+            centerText('Нажмите на карточку статьи, чтобы выдать выговор.')
             imgui.BeginChild('##rules', imgui.ImVec2(0, -8), true)
             local shown = 0
-            for _, rule in ipairs(org.rules) do
+            for index, rule in ipairs(org.rules) do
                 if matches(rule, query) then
                     shown = shown + 1
-                    imgui.TextWrapped(rule.number .. ' — ' .. rule.text)
-                    if imgui.IsItemClicked(0) then openRule(rule) end
-                    imgui.Separator()
+                    local width = imgui.GetContentRegionAvail().x
+                    local textWidth = math.max(100, width - 30)
+                    local textSize = imgui.CalcTextSize(rule.text, nil, false, textWidth)
+                    local rowHeight = math.max(66, textSize.y + 53)
+                    local clicked = imgui.InvisibleButton('##rule_card_' .. index, imgui.ImVec2(width, rowHeight))
+                    local minimum = imgui.GetItemRectMin()
+                    local maximum = imgui.GetItemRectMax()
+                    local hovered = imgui.IsItemHovered()
+                    local drawList = imgui.GetWindowDrawList()
+                    local fill = hovered and imgui.U32(accent[0] * 0.28, accent[1] * 0.28, accent[2] * 0.28, 0.98)
+                        or imgui.U32(0.10, 0.12, 0.16, 0.98)
+                    drawList:AddRectFilled(minimum, maximum, fill, 9.0)
+                    drawList:AddRect(minimum, maximum, imgui.U32(accent[0], accent[1], accent[2], hovered and 0.9 or 0.24), 9.0, nil, 1.0)
+                    local numberSize = imgui.CalcTextSize(rule.number)
+                    local pillWidth = math.max(48, numberSize.x + 18)
+                    local pillMin = imgui.ImVec2(minimum.x + 12, minimum.y + 8)
+                    local pillMax = imgui.ImVec2(pillMin.x + pillWidth, pillMin.y + 22)
+                    drawList:AddRectFilled(pillMin, pillMax, imgui.U32(accent[0], accent[1], accent[2], 0.9), 6.0)
+                    drawList:AddText(imgui.ImVec2(pillMin.x + 9, pillMin.y + 3), imgui.U32(1, 1, 1, 1), rule.number)
+                    drawList:AddTextFontPtr(imgui.GetFont(), imgui.GetFontSize(), imgui.ImVec2(minimum.x + 14, minimum.y + 37),
+                        imgui.U32(0.91, 0.92, 0.96, 1.0), rule.text, nil, textWidth)
+                    if clicked then openRule(rule) end
+                    imgui.Spacing()
                 end
             end
             if shown == 0 then imgui.TextWrapped('Ничего не найдено.') end
@@ -807,28 +958,28 @@ imgui.OnFrame(function() return window[0] end, function()
 end)
 imgui.OnFrame(function() return window[0] and idWindow[0] end, function()
     imgui.SetNextWindowSize(imgui.ImVec2(360, 142), imgui.Cond.Always)
+    applyTheme()
+    imgui.SetNextWindowBgAlpha(getBackgroundOpacity())
     imgui.SetNextWindowFocus()
-    if imgui.Begin('\208\146\208\178\208\181\208\180\208\184\209\130\208\181 ID', idWindow, imgui.WindowFlags.NoResize) then
+    if imgui.Begin('\208\146\208\178\208\181\208\180\208\184\209\130\208\181 ID', idWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse) then
         imgui.Text('\208\161\209\130\208\176\209\130\209\140\209\143: ' .. (chosenRule and chosenRule.number or '?'))
         imgui.PushItemWidth(-1)
-        if idInputFocus then
+        if idInputFocusFrames > 0 then
             imgui.SetKeyboardFocusHere()
-            idInputFocus = false
         end
-        imgui.InputTextWithHint('##player_id', 'ID: 123', idInput, 16)
+        local enterPressed = imgui.InputTextWithHint('##player_id_' .. idInputSession, 'ID игрока, например 123', idInput, 16, imgui.InputTextFlags.EnterReturnsTrue)
+        if idInputFocusFrames > 0 then idInputFocusFrames = idInputFocusFrames - 1 end
         imgui.PopItemWidth()
         imgui.Spacing()
 
         local buttonWidth = (imgui.GetContentRegionAvail().x - 8) / 2
         if imgui.Button('\208\158\209\130\208\188\208\181\208\189\208\176', imgui.ImVec2(buttonWidth, 30)) then idWindow[0] = false end
         imgui.SameLine()
-        if imgui.Button('\208\146\209\139\208\180\208\176\209\130\209\140', imgui.ImVec2(buttonWidth, 30)) then
-            local id = ffi.string(idInput)
+        local issueClicked = imgui.Button('\208\146\209\139\208\180\208\176\209\130\209\140', imgui.ImVec2(buttonWidth, 30))
+        local id = ffi.string(idInput)
+        if issueClicked or (enterPressed and id ~= '') then
             if id:match('^%d+$') and chosenRule then
-                local command = '/gwarn ' .. id .. ' ' .. chosenRule.number .. ' ' .. organizations[chosenOrg].code
-                sampSendChat(u8:decode(command))
-                idWindow[0] = false
-                window[0] = false
+                submitWarning(id)
             else
                 sampAddChatMessage(u8:decode('{FF6666}[GwarnV1]{FFFFFF} \208\146\208\178\208\181\208\180\208\184\209\130\208\181 ID \209\134\208\184\209\132\209\128\208\176\208\188\208\184.'), -1)
             end
@@ -838,12 +989,14 @@ imgui.OnFrame(function() return window[0] and idWindow[0] end, function()
 end)
 imgui.OnFrame(function() return window[0] and articleWindow[0] end, function()
     imgui.SetNextWindowSize(imgui.ImVec2(520, 350), imgui.Cond.FirstUseEver)
+    applyTheme()
+    imgui.SetNextWindowBgAlpha(getBackgroundOpacity())
     if articleWindowFocus then
         imgui.SetNextWindowFocus()
         articleWindowFocus = false
     end
     local title = editorMode == 'add' and 'Добавить устав' or 'Редактировать устав'
-    if imgui.Begin(title, articleWindow, imgui.WindowFlags.NoResize) then
+    if imgui.Begin(title, articleWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse) then
         if articleWindow[0] then
             imgui.Text('Раздел:')
             imgui.ComboStr('##editor_section', editorOrg, organizationItems, 8)
